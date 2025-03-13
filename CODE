@@ -1,0 +1,25 @@
+library(quantmod)
+library(TTR)
+library(PerformanceAnalytics)
+library(ggplot2)
+library(plotly)
+library(leaflet)
+library(knitr)
+library(DT)
+library(broom)
+
+# Define stocks and timeframe
+symbols <- c("AAPL", "MSFT", "GOOG")
+start_date <- "2020-01-01"
+end_date <- Sys.Date()
+
+# Download data with error handling
+stock_data <- list()
+for (symbol in symbols) {
+  tryCatch({
+    stock_data[[symbol]] <- getSymbols(symbol, src = "yahoo", from = start_date, to = end_date, auto.assign = FALSE)
+    cat("Downloaded:", symbol, "\n")
+  }, error = function(e) {
+    cat("Failed:", symbol, "| Error:", conditionMessage(e), "\n")
+  })
+}
