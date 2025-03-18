@@ -23,3 +23,14 @@ for (symbol in symbols) {
     cat("Failed:", symbol, "| Error:", conditionMessage(e), "\n")
   })
 }
+
+# Calculate daily returns
+returns <- lapply(stock_data, function(x) dailyReturn(Ad(x)))
+returns_df <- do.call(merge, returns)
+colnames(returns_df) <- symbols
+returns_df <- na.omit(returns_df)  # Remove NA values
+
+# Summary statistics
+summary_stats <- round(apply(returns_df, 2, summary), 4)
+kable(summary_stats, caption = "Summary Statistics")  # Static table
+DT::datatable(summary_stats)  # Interactive table
