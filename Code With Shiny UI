@@ -1,0 +1,184 @@
+install.packages(c("quantmod", "TTR", "PerformanceAnalytics", 
+                   "ggplot2", "plotly", "leaflet", "knitr","shiny"))
+library(shiny)
+library(quantmod)
+library(TTR)
+library(PerformanceAnalytics)
+library(ggplot2)
+library(plotly)
+library(leaflet)
+library(knitr)
+library(DT)
+library(broom)
+
+# Define stocks and timeframe
+symbols <- c("AAPL", "MSFT", "GOOG")
+start_date <- "2020-01-01"
+end_date <- Sys.Date()
+
+# Download data with error handling
+stock_data <- list()
+for (symbol in symbols) {
+  tryCatch({
+    stock_data[[symbol]] <- getSymbols(symbol, src = "yahoo", from = start_date, to = end_date, auto.assign = FALSE)
+    cat("Downloaded:", symbol, "\n")
+  }, error = function(e) {
+    cat("Failed:", symbol, "| Error:", conditionMessage(e), "\n")
+  })
+}
+
+# Calculate daily returns
+returns <- lapply(stock_data, function(x) dailyReturn(Ad(x)))
+returns_df <- do.call(merge, returns)
+colnames(returns_df) <- symbols
+returns_df <- na.omit(returns_df)  # Remove NA values
+
+# Summary statistics
+summary_stats <- round(apply(returns_df, 2, summary), 4)
+kable(summary_stats, caption = "Summary Statistics")  # Static table
+DT::datatable(summary_stats)  # Interactive table
+
+# Correlation heatmap
+plot_ly(
+  x = symbols,
+  y = symbols,
+  z = cor(returns_df),
+  type = "heatmap",
+  colorscale = "RdYlBu"
+) %>% layout(title = "Stock Return Correlations")
+
+# Linear regression: AAPL vs. MSFT
+lm_model <- lm(AAPL ~ MSFT, data = returns_df)
+kable(broom::tidy(lm_model), caption = "Regression Results")
+
+# T-test: AAPL vs. GOOG returns
+t_test <- t.test(returns_df$AAPL, returns_df$GOOG)
+cat("T-Test p-value:", round(t_test$p.value, 4), "\n")
+
+# SMA strategy for AAPL
+aapl <- stock_data$AAPL
+aapl_df <- data.frame(
+  Date = index(aapl),
+  Price = as.numeric(Cl(aapl)),  # Rename "AAPL.Close" to "Price"
+  SMA_50 = as.numeric(SMA(Cl(aapl), n = 50)),
+  SMA_200 = as.numeric(SMA(Cl(aapl), n = 200))
+)
+
+# Interactive price chart
+plot_ly(aapl_df, x = ~Date) %>%
+  add_lines(y = ~Price, name = "Price") %>%
+  add_lines(y = ~SMA_50, name = "50-Day SMA") %>%
+  add_lines(y = ~SMA_200, name = "200-Day SMA") %>%
+  layout(
+    title = "AAPL Trading Strategy",
+    xaxis = list(title = "Date"),
+    yaxis = list(title = "Price")
+  )
+
+
+
+# Create performance-based colors
+# Calculate average returns
+avg_returns <- round(colMeans(returns_df), 4)
+print(avg_returns)
+
+# Create Leaflet map
+leaflet() %>%
+  addTiles() %>%  # Base map
+  addMarkers(
+    lng = c(-122.0312, -122.1299, -122.0841),
+    lat = c(37.3318, 47.6406, 37.4220),
+    popup = paste(
+      c("Apple Park", "Microsoft HQ", "Googleplex"),
+      "<br>Avg Return: ",
+      avg_returns[c("AAPL", "MSFT", "GOOG")]
+    )
+  ) %>%
+  addLegend(
+    position = "bottomright",
+    colors = "blue",
+    labels = "Tech Company HQs",
+    title = "Legend"
+  )
+
+# Define UI
+ui <- fluidPage(
+  titlePanel("Stock Analysis Dashboard"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("stock", "Select Stock:", choices = c("AAPL", "MSFT", "GOOG")),
+      dateRangeInput("dates", "Date Range:", start = "2020-01-01", end = Sys.Date()),
+      actionButton("update", "Update Data")
+    ),
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Price Chart", plotlyOutput("price_chart")),
+        tabPanel("Returns Analysis", DTOutput("returns_table")),
+        tabPanel("SMA Strategy", plotlyOutput("sma_chart")),
+        tabPanel("Geographical Map", leafletOutput("map"))
+      )
+    )
+  )
+)
+
+# Define server logic
+server <- function(input, output) {
+  # Reactive data download
+  stock_data <- eventReactive(input$update, {
+    getSymbols(input$stock, src = "yahoo", from = input$dates[1], to = input$dates[2], auto.assign = FALSE)
+  })
+  
+  # Reactive returns calculation
+  returns <- reactive({
+    dailyReturn(Ad(stock_data()))
+  })
+  
+  # Price chart
+  output$price_chart <- renderPlotly({
+    data <- stock_data()
+    plot_ly(data, x = ~index(data)) %>%
+      add_lines(y = ~Cl(data), name = "Price") %>%
+      layout(
+        title = paste(input$stock, "Price Chart"),
+        xaxis = list(title = "Date"),
+        yaxis = list(title = "Price")
+      )
+  })
+  
+  # Returns table
+  output$returns_table <- renderDT({
+    data <- returns()
+    datatable(data.frame(Date = index(data), Return = as.numeric(data)), 
+              caption = "Daily Returns")
+  })
+  
+  # SMA strategy chart
+  output$sma_chart <- renderPlotly({
+    data <- stock_data()
+    sma_50 <- SMA(Cl(data), n = 50)
+    sma_200 <- SMA(Cl(data), n = 200)
+    plot_ly(data, x = ~index(data)) %>%
+      add_lines(y = ~Cl(data), name = "Price") %>%
+      add_lines(y = sma_50, name = "50-Day SMA") %>%
+      add_lines(y = sma_200, name = "200-Day SMA") %>%
+      layout(
+        title = paste(input$stock, "SMA Strategy"),
+        xaxis = list(title = "Date"),
+        yaxis = list(title = "Price")
+      )
+  })
+  
+  # Geographical map
+  output$map <- renderLeaflet({
+    leaflet() %>%
+      addTiles() %>%
+      addMarkers(
+        lng = c(-122.0312, -122.1299, -122.0841),
+        lat = c(37.3318, 47.6406, 37.4220),
+        popup = c("Apple Park", "Microsoft HQ", "Googleplex")
+      )
+  })
+}
+
+# Run the app
+shinyApp(ui, server)
