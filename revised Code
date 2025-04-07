@@ -1,0 +1,87 @@
+install.packages("quantmod")  # For downloading stock data
+install.packages("TTR")       # For technical trading indicators
+ install.packages("PerformanceAnalytics") # For performance analysis
+
+# Load the libraries
+library(quantmod)
+library(TTR)
+library(PerformanceAnalytics)
+
+# --- 2. Define Stock Symbols and Time Period ---
+# Define the stock symbols you want to analyze
+stock_symbols <- c("AAPL", "MSFT", "GOOG")  # Example: Apple, Microsoft, Google
+
+# Define the time period for the data
+start_date <- "2020-01-01"  # Start date
+end_date <- Sys.Date()      # Today's date
+
+# --- 3. Download Stock Data using quantmod ---
+# Create an empty list to store the stock data
+stock_data <- list()
+
+# Loop through the stock symbols and download the data
+for (symbol in stock_symbols) {
+  tryCatch({  # Error handling:  If one stock download fails, continue to the next
+    stock_data[[symbol]] <- getSymbols(symbol, src = "yahoo", from = start_date, to = end_date, auto.assign = FALSE)
+    cat("Downloaded data for:", symbol, "\n")  # Print confirmation
+  }, error = function(e) {
+    cat("Error downloading data for:", symbol, ":", conditionMessage(e), "\n")
+  })
+}
+
+# --- 4. Data Inspection and Preparation ---
+# Inspect the first stock's data (if available)
+if (length(stock_data) > 0) {
+  head(stock_data[[stock_symbols[1]]])  # Show the first few rows
+  str(stock_data[[stock_symbols[1]]])   # Show the data structure
+}
+
+# Function to calculate adjusted closing price returns
+calculate_returns <- function(data) {
+  if (!is.null(data)) {
+    # Extract adjusted closing prices
+    adj_close <- Ad(data) # Same as data[, "AAPL.Adjusted"]
+    
+    # Calculate daily returns
+    returns <- dailyReturn(adj_close)
+    return(returns)
+  } else {
+    return(NULL)  # Return NULL if data is missing
+  }
+}
+
+# Calculate returns for all stocks
+stock_returns <- lapply(stock_data, calculate_returns)
+
+# Remove stocks with NULL returns (failed downloads)
+stock_returns <- stock_returns[!sapply(stock_returns, is.null)]
+
+# --- 5. Technical Analysis and Calculations ---
+# Example: Calculate Simple Moving Average (SMA) for the first stock
+
+if (length(stock_returns) > 0) {
+  
+  #SMA Calculation
+  sma_period <- 50 # 50 day moving average
+  
+  # Example: Calculate Simple Moving Average (SMA) for the first stock
+  sma <- SMA(Cl(stock_data[[names(stock_returns)[1]]]), n = sma_period) #Calculates SMA using closing price, for the first stock available
+  head(sma)
+  
+  #Volatility Calculation
+  # Calculate rolling volatility (standard deviation of returns)
+  volatility <- rollapply(stock_returns[[names(stock_returns)[1]]], width = 20, FUN = sd, fill = NA) #20 day rolling volatility
+  plot(volatility, main = paste("Rolling Volatility (20-day) for", names(stock_returns)[1]), ylab = "Volatility", xlab = "Date")
+  
+  
+  #Correlation Matrix
+  # Combine returns into a single data frame for correlation analysis
+  returns_matrix <- do.call(cbind, stock_returns)
+  colnames(returns_matrix) <- names(stock_returns)
+  
+  # Calculate the correlation matrix
+  cor_matrix <- cor(returns_matrix, use = "pairwise.complete.obs") # Handle NAs
+  
+  # Print the correlation matrix
+  print("Correlation Matrix:")
+  print(cor_matrix)
